@@ -1,11 +1,30 @@
 const express = require('express');
-const app = express();
+const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+
+const app = express();
 
 // Middleware to parse incoming JSON requests
 app.use(express.json());
 
-let users = []; // In-memory user storage (replace with database in a real application)
+// MongoDB connection
+mongoose.connect('mongodb+srv://user22:user12345@cluster0.6l6lx.mongodb.net/badminton-booking-system?retryWrites=true&w=majority&appName=Cluster0', {
+    useNewUrlParser: true,
+    useUnifiedTopology: true
+}).then(() => {
+    console.log('MongoDB connected');
+}).catch(err => {
+    console.error('MongoDB connection error:', err);
+});
+
+// Mongoose schema and model for User
+const userSchema = new mongoose.Schema({
+    username: { type: String, required: true },
+    password: { type: String, required: true },
+    email: { type: String, required: true }
+});
+
+const User = mongoose.model('User', userSchema);
 
 // Registration service (POST)
 app.post('/register', async (req, res) => {
@@ -18,8 +37,8 @@ app.post('/register', async (req, res) => {
     // Hash the password before saving
     const hashedPassword = await bcrypt.hash(password, 10);
     
-    const newUser = { username, password: hashedPassword, email };
-    users.push(newUser);
+    const newUser = new User({ username, password: hashedPassword, email });
+    await newUser.save();
 
     res.status(201).json({ message: 'User registered successfully', user: newUser });
 });
@@ -28,7 +47,7 @@ app.post('/register', async (req, res) => {
 app.post('/login', async (req, res) => {
     const { username, password } = req.body;
 
-    const user = users.find(u => u.username === username);
+    const user = await User.findOne({ username });
     if (!user) {
         return res.status(401).json({ message: 'Invalid credentials' });
     }
@@ -43,14 +62,14 @@ app.post('/login', async (req, res) => {
 });
 
 // Search service (GET)
-app.get('/search', (req, res) => {
+app.get('/search', async (req, res) => {
     const { username } = req.query;
     
     if (!username) {
         return res.status(400).json({ message: 'Username query parameter is required' });
     }
 
-    const foundUser = users.filter(u => u.username.toLowerCase().includes(username.toLowerCase()));
+    const foundUser = await User.find({ username: { $regex: username, $options: 'i' } });
     if (foundUser.length === 0) {
         return res.status(404).json({ message: 'No users found' });
     }
@@ -59,43 +78,43 @@ app.get('/search', (req, res) => {
 });
 
 // Profile update service (PUT)
-app.put('/profile/:username', (req, res) => {
-    const { username } = req.params; // current username in URL (e.g., 'Munizin2')
-    const { newusername, email, password } = req.body; // newusername to update, email and password for profile changes
+app.put('/profile/:username', async (req, res) => {
+    const { username } = req.params; 
+    const { newusername, email, password } = req.body;
 
     // Find the user by the current username in the URL
-    const user = users.find(u => u.username === username);
+    const user = await User.findOne({ username });
     if (!user) {
         return res.status(404).json({ message: 'User not found' });
     }
 
     // If a new username is provided, validate if it's already taken
     if (newusername) {
-        const existingUser = users.find(u => u.username === newusername);
+        const existingUser = await User.findOne({ username: newusername });
         if (existingUser) {
             return res.status(400).json({ message: 'Username already taken' });
         }
-        user.username = newusername; // Update the username
+        user.username = newusername;
     }
 
     // Update email and password if provided
     if (email) user.email = email;
-    if (password) user.password = password;
+    if (password) user.password = await bcrypt.hash(password, 10);
+
+    await user.save();
 
     res.status(200).json({ message: 'Profile updated successfully', user });
 });
 
-
 // Delete user service (DELETE)
-app.delete('/user/:username', (req, res) => {
+app.delete('/user/:username', async (req, res) => {
     const { username } = req.params;
 
-    const userIndex = users.findIndex(u => u.username === username);
-    if (userIndex === -1) {
+    const user = await User.findOneAndDelete({ username });
+    if (!user) {
         return res.status(404).json({ message: 'User not found' });
     }
 
-    users.splice(userIndex, 1);
     res.status(200).json({ message: 'User deleted successfully' });
 });
 
